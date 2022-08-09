@@ -13,7 +13,7 @@ function! s:GetGitMergeBuffersIfVimHasBeenInvokedAsMergeTool(list)
 
     if (len(l:xs) == 3)
         " rest of the code expects this order: base, local and remote
-        " should be launches in such order from git mergetool
+        " should be launched in such order from git mergetool
         call extend(a:list, l:xs)
         return 1
     endif
@@ -28,28 +28,62 @@ function! s:ErrorMessage(code, text)
     return a:code
 endfunction
 
+function! s:InfoMessage(code, text)
+    echohl ModeMsg
+    echomsg a:text
+    echohl None
+    return a:code
+endfunction
+
 function! s:ReadGitMergeContentIntoLines(git_file_name, git_merge_tag, lines) abort
     if !filereadable(a:git_file_name)
-        return s:ErrorMessage(1, 'File ' . a:git_file_name . ' does not exist')
+        return s:ErrorMessage(1, "File '" . a:git_file_name . "' does not exist")
     endif
     let l:git_object_name = ':' . a:git_merge_tag . ':' . a:git_file_name
-    let l:lines = systemlist('git show ' . l:git_object_name)
+
+    " git show :[123]:<filename> works only when Vim is opened via git merge tool
+    " let l:lines = systemlist('git show ' . l:git_object_name)
+
+    " using git checkout-index is more universal, works everytime when worktree is in a merge conflict state
+    let l:cmd = "git checkout-index --temp --stage=" .. a:git_merge_tag .. " " .. a:git_file_name
+    let l:tmp_file = system(l:cmd)
     let l:shell_error = v:shell_error
     if l:shell_error != 0
-        return s:ErrorMessage(2, 'Retrieval of git object ' . l:git_object_name . ' failed')
+        " return s:ErrorMessage(2, 'Checkout of ' . a:git_file_name . ' stage=' . a:git_merge_tag . ' has failed')
+        return s:InfoMessage(2, 'File ' . a:git_file_name . ' has no git merge conflict')
     endif
+
+    " the output of git checkout-index is a bit weird <tmpfile filename>^I<original filename>
+    let l:tmp_file = substitute(l:tmp_file, "\t.*", "", "")
+
+    if l:tmp_file == ""
+        return s:ErrorMessage(3, 'Temp file name cannot be empty')
+    endif
+
+    let l:lines = systemlist("cat " .. l:tmp_file)
+    let l:shell_error = v:shell_error
+    if l:shell_error != 0
+        return s:ErrorMessage(4, 'Reading of temp file ' . l:tmp_file . ' has failed')
+    endif
+
+    call system("rm " .. l:tmp_file)
+    let l:shell_error = v:shell_error
+    if l:shell_error != 0
+        return s:ErrorMessage(5, 'Removal of temp file ' . l:tmp_file . ' has failed')
+    endif
+
     call extend(a:lines, l:lines)
     return 0
 endfunction
 
 function! s:ReadGitMergeContentIntoLists(git_file_name, lists) abort
     if !filereadable(a:git_file_name)
-        return s:ErrorMessage(1, 'File ' . a:git_file_name . ' does not exist')
+        return s:ErrorMessage(1, "File '" . a:git_file_name . "' does not exist")
     endif
     let l:buffer_names = []
     let l:is_vim_mergetool = s:GetGitMergeBuffersIfVimHasBeenInvokedAsMergeTool(l:buffer_names)
     " if Vim is used as the git mergetool, then the content is already in buffers named LOCAL BASE REMOTE,
-    "  but the may be unloaded (we need to use readfile instead of getbufline in such cases)
+    "  but they may be unloaded (we need to use readfile instead of getbufline in such cases)
     for l:git_merge_tag in [1,2,3]
         call add(a:lists, [])
         if l:is_vim_mergetool == 1
@@ -86,7 +120,7 @@ endfunction
 function! conflicts#ShowInvolvedFilesIn3WayDiffNewTab() abort
     let l:current_buffer_file_name = expand('%')
     if !filereadable(l:current_buffer_file_name)
-        return s:ErrorMessage(1, 'File ' . l:current_buffer_file_name . ' does not exist')
+        return s:ErrorMessage(1, "File '" . l:current_buffer_file_name . "' does not exist")
     endif
 
     let l:syntax = &syntax
@@ -94,7 +128,7 @@ function! conflicts#ShowInvolvedFilesIn3WayDiffNewTab() abort
     let l:lists = []
     let l:result = s:ReadGitMergeContentIntoLists(l:current_buffer_file_name, l:lists)
     if l:result != 0
-        return s:ErrorMessage(2, 'Retrieval of content of involved git objects failed')
+        return l:result
     endif
 
     let l:base_lines = l:lists[1 - 1]
@@ -144,7 +178,7 @@ endfunction
 function! conflicts#ShowInvolvedFilesIn2WayDiffNewTabs() abort
     let l:current_buffer_file_name = expand('%')
     if !filereadable(l:current_buffer_file_name)
-        return s:ErrorMessage(1, 'File ' . l:current_buffer_file_name . ' does not exist')
+        return s:ErrorMessage(1, "File '" . l:current_buffer_file_name . "' does not exist")
     endif
 
     let l:syntax = &syntax
@@ -152,7 +186,7 @@ function! conflicts#ShowInvolvedFilesIn2WayDiffNewTabs() abort
     let l:lists = []
     let l:result = s:ReadGitMergeContentIntoLists(l:current_buffer_file_name, l:lists)
     if l:result != 0
-        return s:ErrorMessage(2, 'Retrieval of content of involved git objects failed')
+        return l:result
     endif
 
     let l:base_lines = l:lists[1 - 1]
@@ -228,10 +262,7 @@ endfunction
 
 function! conflicts#ShowOriginalFileWithConflictMarkersInNewTab()
 	if s:HasConflictMarkers() == 0
-		echohl ModeMsg
-		echo 'No conflict markers found.'
-		echohl None
-		return 1
+        return s:InfoMessage(1, 'No conflict markers found.')
 	endif
 	let l:origBuf = bufnr('%')
 
@@ -252,10 +283,7 @@ endfunction
 
 function! conflicts#ChangeTo2WayDiffMode() abort
     if s:HasConflictMarkers() == 0
-        echohl ModeMsg
-        echo 'No conflict markers found.'
-        echohl None
-        return 1
+        return s:InfoMessage(1, 'No conflict markers found.')
     endif
     let l:origBuf = bufnr('%')
 
@@ -279,12 +307,21 @@ function! conflicts#ChangeTo2WayDiffMode() abort
     silent execute 'g/^>>>>>>> /d'
     diffthis
 
+    " Jump to the beginning
     normal! gg
 
-    echohl ModeMsg
-    echo 'Resolve conflicts in the right side, then save. If running from git mergetool, then use :cq to abort.'
-    echohl None
-    return 0
+    " Jump to first change from the start
+    normal! ]c
+
+    let l:is_vim_mergetool = s:GetGitMergeBuffersIfVimHasBeenInvokedAsMergeTool([])
+    if l:is_vim_mergetool
+        let l:message = 'Resolve conflicts on the right side, then save. Use :cq to abort.'
+    else
+        let l:message = 'Resolve conflicts on the right side, then save. Afterwards use git add to mark resolution.'
+    endif
+    " Todo: print the echo message asynchronously after a small delay to prevent it being quickly drawn over with other
+    " echo messages
+    return s:InfoMessage(0, l:message)
 endfunction
 
 function! conflicts#ConflictsResolve() abort
