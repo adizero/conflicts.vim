@@ -45,7 +45,7 @@ function! s:ReadGitMergeContentIntoLines(git_file_name, git_merge_tag, lines) ab
     " let l:lines = systemlist('git show ' . l:git_object_name)
 
     " using git checkout-index is more universal, works everytime when worktree is in a merge conflict state
-    let l:cmd = "git checkout-index --temp --stage=" .. a:git_merge_tag .. " " .. a:git_file_name
+    let l:cmd = 'git checkout-index --temp --stage=' . a:git_merge_tag . ' ' . a:git_file_name
     let l:tmp_file = system(l:cmd)
     let l:shell_error = v:shell_error
     if l:shell_error != 0
@@ -54,19 +54,19 @@ function! s:ReadGitMergeContentIntoLines(git_file_name, git_merge_tag, lines) ab
     endif
 
     " the output of git checkout-index is a bit weird <tmpfile filename>^I<original filename>
-    let l:tmp_file = substitute(l:tmp_file, "\t.*", "", "")
+    let l:tmp_file = substitute(l:tmp_file, '\t.*', '', '')
 
-    if l:tmp_file == ""
+    if l:tmp_file == ''
         return s:ErrorMessage(3, 'Temp file name cannot be empty')
     endif
 
-    let l:lines = systemlist("cat " .. l:tmp_file)
+    let l:lines = systemlist('cat ' . l:tmp_file)
     let l:shell_error = v:shell_error
     if l:shell_error != 0
         return s:ErrorMessage(4, 'Reading of temp file ' . l:tmp_file . ' has failed')
     endif
 
-    call system("rm " .. l:tmp_file)
+    call system('rm ' . l:tmp_file)
     let l:shell_error = v:shell_error
     if l:shell_error != 0
         return s:ErrorMessage(5, 'Removal of temp file ' . l:tmp_file . ' has failed')
